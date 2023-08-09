@@ -8,6 +8,13 @@ services:
     volumes:
       - ./client:/app
   
+  admin:
+    build: ./admin
+    ports:
+      - 3001:3001
+    volumes:
+      - ./admin:/app
+  
   server:
     build: ./server
     ports:
