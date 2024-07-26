@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Req,
   Res,
@@ -14,6 +15,8 @@ import { User } from 'src/user/user.entity';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { SignUpDto } from './dto/sign-up.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 
 interface RequestWithUser extends Express.Request {
   user: User;
@@ -61,5 +64,15 @@ export class AuthController {
   @Get('confirmation/:token')
   async verifyEmail(@Param('token') token: string) {
     return this.authService.verifyEmail(token);
+  }
+
+  @Get('forgot-password')
+  async forgotPassword(@Body() forgotPasswordData: ForgotPasswordDto) {
+    return this.authService.sendForgotPasswordEmail(forgotPasswordData.email);
+  }
+
+  @Patch('reset-password')
+  async resetPassword(@Body() resetPasswordData: ResetPasswordDto) {
+    return this.authService.resetPassword(resetPasswordData);
   }
 }

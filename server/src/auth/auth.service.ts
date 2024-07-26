@@ -11,6 +11,7 @@ import { UserService } from '../user/user.service';
 import { User } from 'src/user/user.entity';
 import { MailerService } from '@nestjs-modules/mailer';
 import { ConfigService } from '@nestjs/config';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -127,28 +128,129 @@ export class AuthService {
 
       return { message: 'Email confirmed successfully' };
     } catch (error) {
-      this.handleVerificationError(error);
+      console.log('Error verifying email', error);
+
+      if (
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
+      ) {
+        throw error;
+      }
+
+      if (error.name === 'JsonWebTokenError') {
+        throw new UnauthorizedException('Invalid token');
+      }
+
+      if (error.name === 'TokenExpiredError') {
+        throw new UnauthorizedException('Token has expired');
+      }
+
+      throw new InternalServerErrorException('Failed to verify email');
     }
   }
 
-  private handleVerificationError(error: any) {
-    console.log('Error verifying email', error);
+  async sendForgotPasswordEmail(email: string) {
+    try {
+      const user = await this.userService.findOneByEmail(email);
 
-    if (
-      error instanceof BadRequestException ||
-      error instanceof NotFoundException
-    ) {
-      throw error;
+      if (!user) {
+        throw new NotFoundException('User with this email does not exist');
+      }
+
+      const token = await this.jwtService.signAsync(
+        { email },
+        {
+          secret: this.configService.get('JWT_SECRET'),
+          expiresIn: '1d',
+        },
+      );
+
+      const url = `${this.configService.get(
+        'CORS_ORIGIN',
+      )}/forgot-password/${token}`;
+
+      await this.mailerService.sendMail({
+        to: email,
+        subject: 'Reset password',
+        html: `Please click this link to reset your password: <a href="${url}">${url}</a>`,
+      });
+      return {
+        message:
+          'Reset password email is sent successfully. Please check your email',
+      };
+    } catch (error) {
+      console.error('Error sending reset password email:', error);
+
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      if (error.code === 'EENVELOPE') {
+        throw new BadRequestException('Invalid email address');
+      }
+
+      if (error.code === 'ETIMEDOUT') {
+        throw new InternalServerErrorException(
+          'Email service is unavailable. Please try again later.',
+        );
+      }
+
+      throw new InternalServerErrorException(
+        'Failed to send reset password email',
+      );
     }
+  }
 
-    if (error.name === 'JsonWebTokenError') {
-      throw new UnauthorizedException('Invalid token');
+  async resetPassword(resetPasswordData: ResetPasswordDto) {
+    const { token, newPassword } = resetPasswordData;
+
+    try {
+      const payload = await this.jwtService.verifyAsync(
+        token,
+        this.configService.get('JWT_SECRET'),
+      );
+
+      if (!payload || !payload.email) {
+        throw new BadRequestException('Invalid or expired token');
+      }
+
+      const user = await this.userService.findOneByEmail(payload.email);
+
+      if (!user) {
+        throw new Error('Could not find user');
+      }
+
+      const isPasswordSame = await argon2.verify(user.password, newPassword);
+
+      if (isPasswordSame) {
+        throw new BadRequestException(
+          'New password must be different from the current password',
+        );
+      }
+      const hashedNewPassword = await argon2.hash(newPassword);
+
+      await this.userService.update(user.id, { password: hashedNewPassword });
+
+      return { message: 'Password changed successfully!' };
+    } catch (error) {
+      console.error('Error resetting password:', error);
+
+      if (
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
+      ) {
+        throw error;
+      }
+
+      if (error.name === 'JsonWebTokenError') {
+        throw new UnauthorizedException('Invalid token');
+      }
+
+      if (error.name === 'TokenExpiredError') {
+        throw new UnauthorizedException('Token has expired');
+      }
+
+      throw new InternalServerErrorException('Failed to reset password');
     }
-
-    if (error.name === 'TokenExpiredError') {
-      throw new UnauthorizedException('Token has expired');
-    }
-
-    throw new InternalServerErrorException('Failed to verify email');
   }
 }
